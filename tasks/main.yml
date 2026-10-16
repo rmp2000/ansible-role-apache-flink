@@ -138,6 +138,11 @@
     mode: '0644'
   notify: Restart Apache Flink
 
+- name: Read the distribution Java compatibility options
+  ansible.builtin.slurp:
+    src: /opt/apache-flink/conf/config.yaml
+  register: apache_flink_original_config
+
 - name: Configure Flink listeners and persistent checkpoints
   ansible.builtin.copy:
     content: "{{ apache_flink_configuration | to_nice_yaml }}"
@@ -146,7 +151,11 @@
     group: flink
     mode: '0640'
   vars:
+    apache_flink_vendor_config: "{{ apache_flink_original_config.content | b64decode | from_yaml }}"
     apache_flink_configuration:
+      env.java.opts.all: >-
+        {{ apache_flink_vendor_config.get('env.java.opts.all',
+           apache_flink_vendor_config.get('env', {}).get('java', {}).get('opts', {}).get('all', '')) }}
       jobmanager.rpc.address: "{{ apache_flink_bind_address }}"
       jobmanager.bind-host: "{{ apache_flink_bind_address }}"
       jobmanager.rpc.port: 6123
