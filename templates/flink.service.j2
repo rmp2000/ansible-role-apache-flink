@@ -1,0 +1,27 @@
+[Unit]
+Description=Apache Flink {{ item }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=flink
+Group=flink
+Environment=JAVA_HOME={{ apache_flink_java_home }}
+Environment=FLINK_LOG_DIR=/var/log/apache-flink
+Environment=FLINK_PID_DIR=/run/apache-flink-{{ item }}
+RuntimeDirectory=apache-flink-{{ item }}
+ExecStart={% if item == 'jobmanager' %}/usr/bin/python3 /usr/local/bin/apache-flink-launch{% else %}/opt/apache-flink/bin/taskmanager.sh start-foreground{% endif %}
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+KillMode=control-group
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ apache_flink_data_directory }} /var/log/apache-flink /run/apache-flink-{{ item }}
+
+[Install]
+WantedBy=multi-user.target

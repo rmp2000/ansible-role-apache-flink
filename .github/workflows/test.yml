@@ -1,0 +1,30 @@
+name: Flink functional verification
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: roles/apache_flink
+      - name: Install Ansible
+        run: pip install 'ansible-core==2.16.14'
+      - name: Verify application and checkpoint recovery
+        env:
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/roles
+        run: |
+          ansible-playbook roles/apache_flink/tests/test.yml --syntax-check
+          ansible-playbook roles/apache_flink/tests/test.yml -e apache_flink_test_restart=true
+      - name: Verify application idempotence
+        env:
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/roles
+        run: |
+          set -o pipefail
+          ansible-playbook roles/apache_flink/tests/test.yml | tee /tmp/flink-idempotence.log
+          grep -E 'changed=0[[:space:]]+unreachable=0[[:space:]]+failed=0' /tmp/flink-idempotence.log
+      - name: Diagnostics on failure
+        if: failure() || cancelled()
+        run: |
+          sudo journalctl -u apache-flink-jobmanager -u apache-flink-taskmanager --no-pager -n 100
+          sudo tail -n 100 /var/log/apache-flink/*.log || true

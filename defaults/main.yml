@@ -1,0 +1,16 @@
+---
+apache_flink_version: '1.20.5'
+apache_flink_checksum: sha512:c846ecbcc4a1705724832acdbad27538c31f17aa494e8b69ff5f92d724574be83d1dff0b363aa0570e5a448f529224705d967d0d14df3267143eec5064a52a1f
+apache_flink_bind_address: 127.0.0.1
+apache_flink_data_directory: /srv/apache-flink
+apache_flink_require_data_mount: false
+apache_flink_mode: local
+apache_flink_broker_host: ''
+apache_flink_token: ''
+apache_flink_ca_pem: ''
+apache_flink_input_topic: persistent://platform/events/measurements
+apache_flink_output_topic: persistent://platform/events/data-platform
+apache_flink_subscription: flink-measurements
+apache_flink_verify: true
+apache_flink_test_restart: false
+apache_flink_java_home: "/usr/lib/jvm/java-17-openjdk-{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"

@@ -1,0 +1,263 @@
+---
+- name: Validate the supported Flink deployment
+  ansible.builtin.assert:
+    that:
+      - apache_flink_version == '1.20.5'
+      - apache_flink_mode in ['local', 'pulsar']
+      - apache_flink_data_directory == '/srv/apache-flink'
+      - apache_flink_bind_address | length > 0
+
+- name: Verify the dedicated state filesystem
+  ansible.builtin.shell: >-
+    /usr/bin/python3 -c 'import json,os; p="{{ apache_flink_data_directory }}";
+    print(json.dumps({"mount":os.path.ismount(p),"size":os.statvfs(p).f_frsize*os.statvfs(p).f_blocks}))'
+  register: apache_flink_filesystem
+  changed_when: false
+  when: apache_flink_require_data_mount | bool
+
+- name: Require a real mounted data volume
+  ansible.builtin.assert:
+    that:
+      - (apache_flink_filesystem.stdout | from_json).mount
+      - (apache_flink_filesystem.stdout | from_json).size >= 1073741824
+  when: apache_flink_require_data_mount | bool
+
+- name: Validate private messaging credentials
+  ansible.builtin.assert:
+    that:
+      - apache_flink_broker_host | length > 0
+      - apache_flink_token | length > 20
+      - "'-----BEGIN CERTIFICATE-----' in apache_flink_ca_pem"
+      - apache_flink_input_topic != apache_flink_output_topic
+      - apache_flink_input_topic is match('^persistent://platform/events/[a-zA-Z0-9_-]+$')
+      - apache_flink_output_topic is match('^persistent://platform/events/[a-zA-Z0-9_-]+$')
+  when: apache_flink_mode == 'pulsar'
+  no_log: true
+
+- name: Install the supported Java runtime and build tools
+  ansible.builtin.apt:
+    name: [openjdk-17-jdk-headless, maven, ca-certificates]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the Flink service account
+  ansible.builtin.user:
+    name: flink
+    system: true
+    home: /srv/apache-flink
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Create persistent state and service directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: flink
+    group: flink
+    mode: '0750'
+  loop:
+    - /srv/apache-flink
+    - /srv/apache-flink/input
+    - /srv/apache-flink/output
+    - /srv/apache-flink/checkpoints
+    - /srv/apache-flink/savepoints
+    - /srv/apache-flink/tmp
+    - /var/log/apache-flink
+
+- name: Create protected application configuration directory
+  ansible.builtin.file:
+    path: /etc/apache-flink
+    state: directory
+    owner: root
+    group: flink
+    mode: '0750'
+
+- name: Download the pinned official Flink distribution
+  ansible.builtin.get_url:
+    url: "https://downloads.apache.org/flink/flink-{{ apache_flink_version }}/flink-{{ apache_flink_version }}-bin-scala_2.12.tgz"
+    dest: "/opt/flink-{{ apache_flink_version }}.tgz"
+    checksum: "{{ apache_flink_checksum }}"
+    mode: '0644'
+    timeout: 60
+  async: 900
+  poll: 10
+  register: apache_flink_download
+
+- name: Extract the immutable Flink distribution
+  ansible.builtin.unarchive:
+    src: "/opt/flink-{{ apache_flink_version }}.tgz"
+    dest: /opt
+    remote_src: true
+    creates: "/opt/flink-{{ apache_flink_version }}/bin/flink"
+
+- name: Link the selected Flink distribution
+  ansible.builtin.file:
+    src: "/opt/flink-{{ apache_flink_version }}"
+    dest: /opt/apache-flink
+    state: link
+  notify: Restart Apache Flink
+
+- name: Install the reference application source
+  ansible.builtin.copy:
+    src: job/
+    dest: /opt/apache-flink-job/
+    owner: root
+    group: root
+    mode: preserve
+  register: apache_flink_source
+
+- name: Check the compiled application
+  ansible.builtin.stat:
+    path: /opt/apache-flink-job/target/measurement-job.jar
+  register: apache_flink_jar
+
+- name: Build and unit test the pinned reference application
+  ansible.builtin.command:
+    argv: [mvn, -B, -ntp, package]
+    chdir: /opt/apache-flink-job
+  environment:
+    JAVA_HOME: "{{ apache_flink_java_home }}"
+  when: apache_flink_source.changed or not apache_flink_jar.stat.exists
+
+- name: Create the application classpath directory
+  ansible.builtin.file:
+    path: /opt/apache-flink/usrlib
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the reference application into the application classpath
+  ansible.builtin.copy:
+    src: /opt/apache-flink-job/target/measurement-job.jar
+    dest: /opt/apache-flink/usrlib/measurement-job.jar
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Apache Flink
+
+- name: Configure Flink listeners and persistent checkpoints
+  ansible.builtin.copy:
+    content: "{{ apache_flink_configuration | to_nice_yaml }}"
+    dest: /opt/apache-flink/conf/config.yaml
+    owner: root
+    group: flink
+    mode: '0640'
+  vars:
+    apache_flink_configuration:
+      jobmanager.rpc.address: "{{ apache_flink_bind_address }}"
+      jobmanager.bind-host: "{{ apache_flink_bind_address }}"
+      jobmanager.rpc.port: 6123
+      jobmanager.memory.process.size: 1600m
+      taskmanager.bind-host: "{{ apache_flink_bind_address }}"
+      taskmanager.host: "{{ apache_flink_bind_address }}"
+      taskmanager.memory.process.size: 2560m
+      taskmanager.numberOfTaskSlots: 2
+      parallelism.default: 1
+      rest.address: 127.0.0.1
+      rest.bind-address: 127.0.0.1
+      rest.port: 8081
+      env.java.home: "{{ apache_flink_java_home }}"
+      env.log.dir: /var/log/apache-flink
+      io.tmp.dirs: /srv/apache-flink/tmp
+      state.backend.type: hashmap
+      state.checkpoints.dir: file:///srv/apache-flink/checkpoints
+      state.savepoints.dir: file:///srv/apache-flink/savepoints
+      state.checkpoints.num-retained: 3
+      execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+      execution.checkpointing.timeout: 120 s
+      execution.checkpointing.min-pause: 1 s
+      web.submit.enable: false
+      web.cancel.enable: false
+  notify: Restart Apache Flink
+
+- name: Install scoped messaging credentials
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "/etc/apache-flink/{{ item.name }}"
+    owner: root
+    group: flink
+    mode: '0640'
+  loop:
+    - {name: client.token, content: "{{ apache_flink_token }}"}
+    - {name: pulsar-ca.crt, content: "{{ apache_flink_ca_pem }}"}
+  when: apache_flink_mode == 'pulsar'
+  no_log: true
+  notify: Restart Apache Flink
+
+- name: Configure the application mode without embedding credentials
+  ansible.builtin.copy:
+    content: >-
+      {{ {'mode': apache_flink_mode, 'data_directory': apache_flink_data_directory,
+          'input_directory': '/srv/apache-flink/input', 'output_directory': '/srv/apache-flink/output',
+          'broker_url': 'pulsar+ssl://' ~ apache_flink_broker_host ~ ':6651',
+          'admin_url': 'https://' ~ apache_flink_broker_host ~ ':8443',
+          'input_topic': apache_flink_input_topic, 'output_topic': apache_flink_output_topic,
+          'subscription': apache_flink_subscription, 'token_file': '/etc/apache-flink/client.token',
+          'ca_file': '/etc/apache-flink/pulsar-ca.crt'} | to_nice_json }}
+    dest: /etc/apache-flink/job.json
+    owner: root
+    group: flink
+    mode: '0640'
+  notify: Restart Apache Flink
+
+- name: Install the checkpoint restore launcher
+  ansible.builtin.copy:
+    src: launch.py
+    dest: /usr/local/bin/apache-flink-launch
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart Apache Flink
+
+- name: Install the functional verifier
+  ansible.builtin.copy:
+    src: verify_flink.py
+    dest: /usr/local/bin/apache-flink-verify
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install JobManager and TaskManager service units
+  ansible.builtin.template:
+    src: flink.service.j2
+    dest: "/etc/systemd/system/apache-flink-{{ item }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [jobmanager, taskmanager]
+  notify: Restart Apache Flink
+
+- name: Apply the service configuration
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the Flink services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  loop: [apache-flink-jobmanager, apache-flink-taskmanager]
+
+- name: Verify job health and local stateful processing
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, /usr/local/bin/apache-flink-verify, smoke]
+  changed_when: false
+  when: apache_flink_verify | bool
+
+- name: Report successful application verification
+  ansible.builtin.debug:
+    msg: APACHE_FLINK_SMOKE_OK
+  when: apache_flink_verify | bool
+
+- name: Optionally test checkpoint recovery after service restart
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, /usr/local/bin/apache-flink-verify, restart]
+  when: apache_flink_test_restart | bool and apache_flink_mode == 'local'
+
+- name: Report checkpoint recovery verification
+  ansible.builtin.debug:
+    msg: APACHE_FLINK_CHECKPOINT_RECOVERY_OK
+  when: apache_flink_test_restart | bool and apache_flink_mode == 'local'
