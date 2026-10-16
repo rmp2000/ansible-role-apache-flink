@@ -22,7 +22,14 @@
         <executions><execution><phase>package</phase><goals><goal>shade</goal></goals><configuration>
           <createDependencyReducedPom>false</createDependencyReducedPom>
           <!-- This job targets Java 17; do not package alternate multi-release classes for newer JDKs. -->
-          <filters><filter><artifact>*:*</artifact><excludes><exclude>META-INF/*.SF</exclude><exclude>META-INF/*.RSA</exclude><exclude>META-INF/*.DSA</exclude><exclude>META-INF/versions/**</exclude></excludes></filter></filters>
+          <filters>
+            <filter><artifact>*:*</artifact><excludes><exclude>META-INF/*.SF</exclude><exclude>META-INF/*.RSA</exclude><exclude>META-INF/*.DSA</exclude><exclude>META-INF/versions/**</exclude></excludes></filter>
+            <!-- Compile these two Apache source classes against the patched 3.0.17 API. -->
+            <filter><artifact>org.apache.flink:flink-connector-pulsar</artifact><excludes>
+              <exclude>org/apache/flink/connector/pulsar/source/enumerator/subscriber/impl/BasePulsarSubscriber*.class</exclude>
+              <exclude>org/apache/flink/connector/pulsar/sink/writer/topic/MetadataListener*.class</exclude>
+            </excludes></filter>
+          </filters>
           <relocations><relocation><pattern>com.fasterxml.jackson</pattern><shadedPattern>org.data_platform.shaded.jackson</shadedPattern></relocation></relocations>
           <transformers><transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/><transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer"><mainClass>org.data_platform.MeasurementJob</mainClass></transformer></transformers>
         </configuration></execution></executions>

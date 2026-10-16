@@ -1,0 +1,14 @@
+This application bundles Apache Flink and Apache Pulsar components distributed
+under the Apache License, Version 2.0.
+
+BasePulsarSubscriber.java and MetadataListener.java are derived from the official
+Apache Flink Pulsar Connector 4.2.0-1.20 sources published at Maven Central:
+https://repo.maven.apache.org/maven2/org/apache/flink/flink-connector-pulsar/4.2.0-1.20/flink-connector-pulsar-4.2.0-1.20-sources.jar
+
+Modification: metadata lookups call the Pulsar client 3.0.17 three-argument
+getPartitionedTopicMetadata API, disabling metadata auto-creation and permitting
+the legacy-broker fallback. Topics are explicitly bootstrapped before the job.
+The two original binary classes and their inner classes are excluded from the
+shaded dependency, and these sources are compiled against the pinned client.
+Original Apache license headers are preserved. Remove this compatibility patch
+when a released connector supports the updated client API directly.

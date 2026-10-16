@@ -6,6 +6,13 @@ listeners bind loopback; access REST 8081 through an authenticated SSH tunnel.
 The SHA512-verified distribution and Maven dependencies are pinned. Compilation
 and unit tests run when source changes, not on ordinary convergence.
 
+The connector binary was built against Pulsar client 3.0.5. Client 3.0.17 changed
+an internal metadata lookup signature. The job compiles two Apache connector
+source classes with the updated call and excludes their older binary versions
+from the shaded dependency. See `files/job/NOTICE` for provenance and the exact
+patch. Live Pulsar integration testing is required before promoting a revision;
+local-file mode alone cannot prove connector compatibility.
+
 Local mode watches `/srv/apache-flink/input` for complete JSONL files. Each line
 must have `event_id` (1-128 alphanumeric/underscore/hyphen), `sensor` (1-64 of the
 same characters), and finite numeric `value` with absolute value <= 1e9. Input

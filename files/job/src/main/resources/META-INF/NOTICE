@@ -1,0 +1,4 @@
+This application includes Apache Flink Pulsar Connector 4.2.0-1.20 sources
+BasePulsarSubscriber and MetadataListener, modified for the metadata lookup API
+of Pulsar client 3.0.17. Original Apache license headers are preserved.
+See the application source NOTICE for provenance and modification details.
