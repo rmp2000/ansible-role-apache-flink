@@ -10,12 +10,14 @@ import uuid
 
 ROOT = Path('/srv/apache-flink')
 STAGED = ROOT/'.verification.json'
-JOB = 'd1a7a00000000000000000000000000001'
+JOB = 'bd003e1f1db333f8652cb8a391d5ab3a'
 
 
-def wait_for(test, label, timeout=240):
+def wait_for(test, label, timeout=240, guard=None):
     until = time.monotonic()+timeout
     while time.monotonic() < until:
+        if guard:
+            guard()
         try:
             value = test()
             if value:
@@ -35,6 +37,13 @@ def healthy():
     job = api('/jobs/'+JOB)
     return (job['state'] == 'RUNNING' and job['vertices']
             and all(vertex['status'] == 'RUNNING' for vertex in job['vertices']))
+
+
+def check_services():
+    for name in ('apache-flink-jobmanager', 'apache-flink-taskmanager'):
+        value = subprocess.check_output(['systemctl', 'show', name, '-p', 'NRestarts', '--value'], text=True)
+        if int(value.strip() or '0') > 3:
+            raise RuntimeError('Service repeatedly failed to start: '+name)
 
 
 def checkpoint():
@@ -85,7 +94,7 @@ def cleanup():
 def main():
     mode = sys.argv[1]
     settings = json.loads(Path('/etc/apache-flink/job.json').read_text())
-    wait_for(healthy, 'running Flink source, aggregation and sink')
+    wait_for(healthy, 'running Flink source, aggregation and sink', guard=check_services)
     wait_for(checkpoint, 'completed persistent checkpoint')
     if settings['mode'] != 'local':
         if mode != 'smoke':

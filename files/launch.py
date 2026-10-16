@@ -8,7 +8,7 @@ root = Path(config['data_directory'])
 checkpoints = list((root/'checkpoints').glob('*/chk-*/_metadata'))
 args = ['/opt/apache-flink/bin/standalone-job.sh', 'start-foreground',
         '--job-classname', 'org.data_platform.MeasurementJob',
-        '--job-id', 'd1a7a00000000000000000000000000001']
+        '--job-id', 'bd003e1f1db333f8652cb8a391d5ab3a']
 if checkpoints:
     latest = max(checkpoints, key=lambda path: path.stat().st_mtime_ns)
     args += ['--fromSavepoint', latest.parent.as_uri()]
