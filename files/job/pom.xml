@@ -21,7 +21,8 @@
         <groupId>org.apache.maven.plugins</groupId><artifactId>maven-shade-plugin</artifactId><version>3.6.0</version>
         <executions><execution><phase>package</phase><goals><goal>shade</goal></goals><configuration>
           <createDependencyReducedPom>false</createDependencyReducedPom>
-          <filters><filter><artifact>*:*</artifact><excludes><exclude>META-INF/*.SF</exclude><exclude>META-INF/*.RSA</exclude><exclude>META-INF/*.DSA</exclude></excludes></filter></filters>
+          <!-- This job targets Java 17; do not package alternate multi-release classes for newer JDKs. -->
+          <filters><filter><artifact>*:*</artifact><excludes><exclude>META-INF/*.SF</exclude><exclude>META-INF/*.RSA</exclude><exclude>META-INF/*.DSA</exclude><exclude>META-INF/versions/**</exclude></excludes></filter></filters>
           <relocations><relocation><pattern>com.fasterxml.jackson</pattern><shadedPattern>org.data_platform.shaded.jackson</shadedPattern></relocation></relocations>
           <transformers><transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/><transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer"><mainClass>org.data_platform.MeasurementJob</mainClass></transformer></transformers>
         </configuration></execution></executions>
